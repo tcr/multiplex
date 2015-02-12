@@ -77,8 +77,8 @@ var multiplex = function(opts, onstream) {
     var reply = channel < 0
     var index = reply ? -channel-1 : channel-1
 
-    if (!reply && !remote[index] && onstream) {
-      onstream(addChannel(remote, index, frame.name), frame.name || index)
+    if (!reply && !remote[index]) {
+      dup.emit('stream', addChannel(remote, index, frame.name), frame.name || index);
     }
 
     var list = reply ? local : remote
@@ -124,6 +124,43 @@ var multiplex = function(opts, onstream) {
     if (index === -1) index = local.push(null)-1
     return addChannel(local, index, name && ''+name)
   }
+
+  dup.remoteStream = function(name) {
+    var stream = new (require('stream').Duplex)();
+    var queue = null;
+
+    stream._read = function () { };
+    stream._write = function (chunk, encoding, callback) {
+      queue = [chunk, encoding, callback];
+    }
+
+    dup.on('stream', function (tapped, id) {
+      if (id != name) { return; }
+
+      stream._write = function (chunk, encoding, callback) {
+        tapped.write(chunk, encoding, callback);
+      }
+      tapped.on('data', function (data) {
+        stream.push(data);
+      });
+      if (queue) {
+        stream._write.apply(stream, queue);
+        queue = null;
+      }
+    });
+
+    return stream;
+  }
+
+  dup.serve = function (id, stream) {
+    var through = dup.createStream(id);
+    stream.pipe(through).pipe(stream);
+    dup.on('end', function () {
+      stream.unpipe && stream.unpipe(through);
+    })
+  }
+
+  onstream && dup.on('stream', onstream);
 
   return dup
 }
